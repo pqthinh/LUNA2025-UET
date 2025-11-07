@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import models
+from ..deps import get_current_user
 
 router = APIRouter(prefix="/leaderboard", tags=["leaderboard"])
 
 @router.get("/")
-def leaderboard(dataset_id: int | None = None, db: Session = Depends(get_db)):
+def leaderboard(dataset_id: int | None = None, db: Session = Depends(get_db), user = Depends(get_current_user)):
     q = db.query(models.Submission, models.User.group_name)        .join(models.User, models.User.id == models.Submission.user_id)
     if dataset_id:
         q = q.filter(models.Submission.dataset_id == dataset_id)
@@ -32,7 +33,7 @@ def leaderboard(dataset_id: int | None = None, db: Session = Depends(get_db)):
     return sorted(best.values(), key=lambda x: (-x["auc"], -x["f1"]))
 
 @router.get("/history")
-def history(group_name: str, dataset_id: int, db: Session = Depends(get_db)):
+def history(group_name: str, dataset_id: int, db: Session = Depends(get_db), user = Depends(get_current_user)):
     q = db.query(models.Submission, models.User.group_name)        .join(models.User, models.User.id == models.Submission.user_id)        .filter(models.User.group_name == group_name, models.Submission.dataset_id == dataset_id)        .order_by(models.Submission.created_at.asc())
     rows = q.all()
     out = []

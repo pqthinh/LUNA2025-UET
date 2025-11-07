@@ -27,8 +27,14 @@ export default function Datasets(){
     fd.append('description', desc)
     if (dataFile) fd.append('data_file', dataFile)
     fd.append('groundtruth_csv', gtFile)
-    await axios.post(`${API}/datasets/`, fd, { headers: authHeader })
-    setMsg('Uploaded'); setDataFile(null); setGtFile(null); load()
+    try {
+      await axios.post(`${API}/datasets/`, fd, { headers: authHeader })
+      setMsg('Uploaded'); setDataFile(null); setGtFile(null); load()
+    } catch(ex) {
+      const msg = ex.response?.data?.detail || 'Upload failed'
+      setMsg(msg)
+      window.alert('Dataset upload error: ' + msg)
+    }
   }
 
   const markOfficial = async (id)=>{

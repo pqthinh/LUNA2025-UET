@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import models
-from ..deps import get_current_user
+from ..deps import get_current_user, require_admin
 from ..evaluate import evaluate_predictions
 import os, shutil
 
@@ -50,7 +50,7 @@ def get_submission(sub_id: int, db: Session = Depends(get_db), user = Depends(ge
         raise HTTPException(status_code=403, detail="Forbidden")
     return sub
 
-@router.post("/{sub_id}/evaluate")
+@router.post("/{sub_id}/evaluate", dependencies=[Depends(require_admin)])
 def evaluate_submission(sub_id: int, db: Session = Depends(get_db), user = Depends(get_current_user)):
     sub = db.query(models.Submission).get(sub_id)
     if not sub: raise HTTPException(status_code=404, detail="Submission not found")

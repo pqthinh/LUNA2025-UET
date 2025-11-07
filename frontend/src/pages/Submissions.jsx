@@ -27,13 +27,23 @@ export default function Submissions(){
     const fd = new FormData()
     fd.append('dataset_id', datasetId)
     fd.append('file', file)
-    await axios.post(`${API}/submissions/`, fd, { headers: authHeader })
-    load()
+    try {
+      await axios.post(`${API}/submissions/`, fd, { headers: authHeader })
+      load()
+    } catch(ex) {
+      const msg = ex.response?.data?.detail || 'Upload failed'
+      window.alert('Submission upload error: ' + msg)
+    }
   }
 
   const evaluate = async (id)=>{
-    await axios.post(`${API}/submissions/${id}/evaluate`, null, { headers: authHeader })
-    load()
+    try {
+      await axios.post(`${API}/submissions/${id}/evaluate`, null, { headers: authHeader })
+      load()
+    } catch(ex) {
+      const msg = ex.response?.data?.detail || 'Evaluate failed'
+      window.alert('Evaluate error: ' + msg)
+    }
   }
 
   return (
