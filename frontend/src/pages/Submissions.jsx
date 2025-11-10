@@ -1,106 +1,308 @@
-import React, { useEffect, useState } from 'react'
-import axios from 'axios'
-import { useAuth } from '../state/auth.jsx'
-import { Link } from 'react-router-dom'
+import React, { useEffect, useState } from "react";
+import axios from "axios";
+import { useAuth } from "../state/auth.jsx";
 
-export default function Submissions(){
-  const { API, authHeader } = useAuth()
-  const [datasets, setDatasets] = useState({items:[]})
-  const [items, setItems] = useState({items:[]})
-  const [datasetId, setDatasetId] = useState('')
-  const [file, setFile] = useState(null)
-  const [page, setPage] = useState(1)
+export default function Submissions() {
+  const { API, authHeader, user } = useAuth();
+  const [submissions, setSubmissions] = useState([]);
+  const [datasets, setDatasets] = useState([]);
+  const [selectedDatasetId, setSelectedDatasetId] = useState("");
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState("");
 
-  const load = ()=>{
-    axios.get(`${API}/datasets/`).then(r=>{
-      setDatasets(r.data)
-      const off = r.data.items.find(x=>x.is_official)
-      if (off) setDatasetId(String(off.id))
-    })
-    axios.get(`${API}/submissions/?page=${page}&page_size=20${datasetId?`&dataset_id=${datasetId}`:''}`, { headers: authHeader })
-      .then(r=>setItems(r.data))
-  }
-  useEffect(()=>{ load() }, [page, datasetId])
+  // Use same header helper as Datasets.jsx (keeps behavior identical)
+  const getHeaders = () => (typeof authHeader === "function" ? authHeader() : authHeader || {});
 
-  const upload = async (e)=>{
-    e.preventDefault()
-    const fd = new FormData()
-    fd.append('dataset_id', datasetId)
-    fd.append('file', file)
+  const loadAll = async () => {
+    setLoading(true);
     try {
-      await axios.post(`${API}/submissions/`, fd, { headers: authHeader })
-      load()
-    } catch(ex) {
-      const msg = ex.response?.data?.detail || 'Upload failed'
-      window.alert('Submission upload error: ' + msg)
-    }
-  }
+      const headers = getHeaders();
 
-  const evaluate = async (id)=>{
-    try {
-      await axios.post(`${API}/submissions/${id}/evaluate`, null, { headers: authHeader })
-      load()
-    } catch(ex) {
-      const msg = ex.response?.data?.detail || 'Evaluate failed'
-      window.alert('Evaluate error: ' + msg)
+      // load submissions
+      const sRes = await fetch(`${API}/submissions?page=1&page_size=200`, { headers });
+      const sJson = sRes.ok ? await sRes.json() : [];
+      const sItems = sJson.items ?? sJson.results ?? sJson.data ?? sJson ?? [];
+
+      // Normalize submissions: parse metrics JSON and promote common metric keys
+      const normalized = (Array.isArray(sItems) ? sItems : []).map((s) => {
+        const copy = { ...s };
+
+        // parse legacy/backend variants: score_json -> metrics
+        if (copy.score_json && typeof copy.score_json === "string") {
+          try {
+            copy.metrics = JSON.parse(copy.score_json);
+          } catch {
+            copy.metrics = undefined;
+          }
+        } else if (copy.score_json && typeof copy.score_json === "object") {
+          copy.metrics = copy.metrics ?? copy.score_json;
+        }
+
+        // parse metrics if it's still a JSON string
+        if (typeof copy.metrics === "string") {
+          try {
+            copy.metrics = JSON.parse(copy.metrics);
+          } catch {
+            // ignore parse error
+          }
+        }
+
+        // promote common metric keys from metrics or nested structures
+        if (copy.metrics && typeof copy.metrics === "object") {
+          // direct keys
+          ["f1", "precision", "recall", "accuracy", "auc"].forEach((k) => {
+            if (copy[k] === undefined && copy.metrics[k] !== undefined) {
+              copy[k] = copy.metrics[k];
+            }
+          });
+          // some backends place results under .results
+          if (copy.metrics.results && typeof copy.metrics.results === "object") {
+            Object.keys(copy.metrics.results).forEach((mk) => {
+              if (["f1", "precision", "recall", "accuracy", "auc"].includes(mk) && copy[mk] === undefined) {
+                copy[mk] = copy.metrics.results[mk];
+              }
+            });
+          }
+        }
+
+        // map auc -> accuracy/score for UI where appropriate
+        if (copy.accuracy === undefined && copy.auc !== undefined) {
+          copy.accuracy = copy.auc;
+        }
+        if (copy.score === undefined && copy.auc !== undefined) {
+          copy.score = copy.auc;
+        }
+
+        // ensure score alias is present from accuracy if needed
+        if (copy.score === undefined && copy.accuracy !== undefined) {
+          copy.score = copy.accuracy;
+        }
+
+        // uploaded time fallback
+        if (!copy.uploaded_at) {
+          if (copy.created_at) copy.uploaded_at = copy.created_at;
+          else if (copy.created) copy.uploaded_at = copy.created;
+        }
+        // filename fallback from other possible fields
+        if (!copy.filename) {
+          const f = copy.file_name || copy.file_path || copy.path || copy.storage_path;
+          if (f) {
+            const parts = String(f).split("/").pop().split("\\").pop();
+            copy.filename = parts;
+          }
+        }
+        return copy;
+      });
+
+      setSubmissions(normalized);
+
+      // --- replace fetch with axios to surface backend validation error ---
+      let dItems = [];
+      try {
+        const resp = await axios.get(`${API}/datasets/`, {
+          params: { page: 1, page_size: 50 }, // use safe page_size to avoid 422
+          headers: headers,
+        });
+        dItems = resp.data.items ?? resp.data.results ?? resp.data.data ?? resp.data ?? [];
+        console.log("datasets response", resp.data);
+      } catch (err) {
+        // show full error payload (FastAPI returns validation details in response.data)
+        console.error("datasets axios error", err.response?.status, err.response?.data ?? err.message);
+        setMsg(
+          err.response?.data?.detail
+            ? String(err.response.data.detail)
+            : `Datasets load error: ${err.response?.status || err.message}`
+        );
+        dItems = [];
+      }
+
+      setDatasets(Array.isArray(dItems) ? dItems : []);
+      if (!selectedDatasetId && dItems.length > 0) {
+        setSelectedDatasetId(String(dItems[0].id ?? ""));
+      }
+      if (!dItems.length && !msg) {
+        setMsg(dItems.length === 0 ? "No datasets available" : "");
+      }
+    } catch (err) {
+      console.error("loadAll error", err);
+      setMsg("Failed to load submissions/datasets");
+      setSubmissions([]);
+      setDatasets([]);
+    } finally {
+      setLoading(false);
     }
-  }
+  };
+
+  useEffect(() => {
+    loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const upload = async (e) => {
+    e.preventDefault();
+    if (!file) {
+      setMsg("Choose a file to upload");
+      return;
+    }
+    const fd = new FormData();
+    fd.append("file", file);
+    if (selectedDatasetId) fd.append("dataset_id", selectedDatasetId);
+    try {
+      const headers = getHeaders();
+      await axios.post(`${API}/submissions/`, fd, {
+        headers,
+      });
+      setMsg("Uploaded");
+      setFile(null);
+      // refresh lists
+      await loadAll();
+    } catch (ex) {
+      console.error("upload error", ex);
+      const errMsg = ex.response?.data?.detail || ex.message || "Upload failed";
+      setMsg(errMsg);
+      window.alert("Upload error: " + errMsg);
+    }
+  };
+
+  const deleteSubmission = async (id, uploaderId) => {
+    // allow only admin or owner in UI, backend will enforce too
+    if (user?.role !== "admin" && user?.id !== uploaderId) {
+      alert("Not allowed to delete this submission");
+      return;
+    }
+    if (!confirm("Delete this submission?")) return;
+    try {
+      const headers = getHeaders();
+      await axios.delete(`${API}/submissions/${id}`, { headers });
+      setMsg("Deleted");
+      await loadAll();
+    } catch (err) {
+      console.error("delete error", err);
+      alert("Failed to delete submission");
+    }
+  };
 
   return (
     <div className="space-y-6">
       <div className="text-2xl font-semibold">Submissions</div>
 
-      <form onSubmit={upload} className="card grid md:grid-cols-3 gap-3 items-end">
-        <div>
-          <div className="label">Dataset</div>
-          <select className="input" value={datasetId} onChange={e=>setDatasetId(e.target.value)}>
-            {datasets.items.map(d => <option key={d.id} value={d.id}>{d.name} {d.is_official ? '(Official)' : ''}</option>)}
-          </select>
+      <form onSubmit={upload} className="card grid gap-3">
+        <div className="grid md:grid-cols-2 gap-3">
+          <div>
+            <div className="label">Dataset to evaluate against</div>
+            <select
+              className="input"
+              value={selectedDatasetId}
+              onChange={(e) => setSelectedDatasetId(e.target.value)}
+            >
+              <option value="">(none)</option>
+              {datasets.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name ?? d.id} {d.is_official ? "— Official" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <div className="label">Submission file (CSV)</div>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+          </div>
         </div>
+
         <div>
-          <div className="label">Prediction CSV (id,label_pred)</div>
-          <input type="file" onChange={e=>setFile(e.target.files[0])} />
+          <button className="btn" type="submit" disabled={!file}>
+            Upload submission
+          </button>
+          {msg && <span className="text-sm ml-3">{msg}</span>}
         </div>
-        <button className="btn">Upload</button>
       </form>
 
-      <div className="grid gap-3">
-        {items.items.map(s => (
-          <div key={s.id} className="card">
-            <div className="flex justify-between items-center">
-              <div>
-                <div className="font-semibold">Submission #{s.id}</div>
-                <div className="text-xs opacity-80">Dataset: {s.dataset_id}</div>
+      {loading ? (
+        <div className="card">Loading submissions...</div>
+      ) : submissions.length === 0 ? (
+        <div className="card">No submissions found.</div>
+      ) : (
+        <div className="grid gap-3">
+          {submissions.map((s) => (
+            <div key={s.id ?? s.filename} className="card flex items-center justify-between p-4">
+              {/* left: basic info */}
+              <div className="flex-1 pr-6">
+                <div className="text-lg font-semibold">{s.filename ?? "submission"}</div>
+                <div className="text-sm text-gray-600 mt-1">
+                  Dataset:{" "}
+                  <span className="font-medium text-gray-800">
+                    {s.dataset_name ?? (s.dataset_id ? `Dataset ${s.dataset_id}` : "—")}
+                  </span>
+                </div>
+                <div className="text-sm text-gray-600 mt-1">
+                  Uploader:{" "}
+                  <span className="font-medium text-gray-800">{String(s.uploader_id ?? s.uploader ?? "N/A")}</span>
+                </div>
+                {s.uploaded_at && (
+                  <div className="text-xs text-gray-500 mt-1">
+                    Uploaded: {new Date(s.uploaded_at).toLocaleString()}
+                  </div>
+                )}
               </div>
-              <div className="flex gap-2">
-                <button className="btn" onClick={()=>evaluate(s.id)}>Evaluate</button>
-                <Link to={`/submissions/${s.id}`} className="btn">Detail</Link>
+
+              {/* right: metrics + actions */}
+              <div className="flex items-center gap-4">
+                {/* metrics card (moved slightly left) */}
+                <div className="w-100 mr-10 bg-gradient-to-br from-white to-gray-50 border border-gray-200 rounded-lg p-4 shadow-sm flex items-center space-x-6">
+                  {/* four metrics horizontally with extra spacing */}
+                  <div className="flex-1 text-center min-w-[64px]">
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">F1</div>
+                    <div className="text-2xl text-indigo-600 font-semibold">
+                      {s.f1 !== undefined ? Number(s.f1).toFixed(3) : "—"}
+                    </div>
+                  </div>
+                  <div className="flex-1 text-center min-w-[64px]">
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">Accuracy</div>
+                    <div className="text-2xl text-indigo-600 font-semibold">
+                      {s.accuracy !== undefined ? Number(s.accuracy).toFixed(3) : "—"}
+                    </div>
+                  </div>
+                  <div className="flex-1 text-center min-w-[64px]">
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">Recall</div>
+                    <div className="text-2xl text-indigo-600 font-semibold">
+                      {s.recall !== undefined ? Number(s.recall).toFixed(3) : "—"}
+                    </div>
+                  </div>
+                  <div className="flex-1 text-center min-w-[64px]">
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">AUC</div>
+                    <div className="text-2xl text-indigo-600 font-semibold">
+                      {s.auc !== undefined ? Number(s.auc).toFixed(3) : "—"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* actions */}
+                <div className="flex flex-col items-end gap-2">
+                  <a
+                    className="btn"
+                    href={`${API}/submissions/${s.id}/download`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Download
+                  </a>
+                  {(user?.role === "admin" || user?.id === s.uploader_id) && (
+                    <button className="btn btn-danger" onClick={() => deleteSubmission(s.id, s.uploader_id)}>
+                      Delete
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
-            {s.evaluated && s.score_json && (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3 text-sm">
-                <div>AUC: <b>{s.score_json.AUC?.toFixed?.(4) ?? '—'}</b></div>
-                <div>F1: <b>{s.score_json.F1?.toFixed?.(4) ?? '—'}</b></div>
-                <div>Accuracy: <b>{s.score_json.Accuracy?.toFixed?.(4) ?? '—'}</b></div>
-                <div>Recall: <b>{s.score_json.Recall?.toFixed?.(4) ?? '—'}</b></div>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div className="flex items-center gap-3">
-        <div className="label">Filter dataset</div>
-        <select className="input w-60" value={datasetId} onChange={e=>setDatasetId(e.target.value)}>
-          <option value="">All</option>
-          {datasets.items.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
-      </div>
-
-      <div className="flex justify-end gap-2">
-        <button className="btn" onClick={()=>setPage(Math.max(1,page-1))}>Prev</button>
-        <button className="btn" onClick={()=>setPage(page+1)}>Next</button>
-      </div>
+          ))}
+        </div>
+      )}
     </div>
-  )
+  );
 }

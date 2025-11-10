@@ -10,3 +10,4 @@ pandas
 python-dotenv
 httpx
 pytest
+minio
