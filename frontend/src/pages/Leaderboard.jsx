@@ -60,7 +60,6 @@ export default function Leaderboard(){
           <p className="text-navy-600 mt-2">Track team performance and rankings</p>
         </div>
       </div>
-      
       <div className="card">
         <div className="flex gap-4 items-center flex-wrap">
           <div>
@@ -86,34 +85,62 @@ export default function Leaderboard(){
       <div className="card overflow-x-auto">
         <table className="min-w-full">
           <thead>
-            <tr className="text-left border-b">
-              <th className="p-2">#</th>
-              <th className="p-2">Group</th>
-              <th className="p-2">Uploader</th>
-              <th className="p-2">Dataset</th>
-
-              {/* clickable metric headers: click to sort by that metric */}
-              <th className={`cursor-pointer ${metric==='AUC' ? 'text-brand-600' : ''}`} onClick={()=>setMetric('AUC')}>AUC</th>
-              <th className={`cursor-pointer ${metric==='F1' ? 'text-brand-600' : ''}`} onClick={()=>setMetric('F1')}>F1</th>
-              <th className={`cursor-pointer ${metric==='PRECISION' ? 'text-brand-600' : ''}`} onClick={()=>setMetric('PRECISION')}>PRECISION</th>
-              <th className={`cursor-pointer ${metric==='RECALL' ? 'text-brand-600' : ''}`} onClick={()=>setMetric('RECALL')}>Recall {metric==='RECALL' && '↓'}</th>
-              <th className={`cursor-pointer ${metric==='ACC' ? 'text-brand-600' : ''}`} onClick={()=>setMetric('ACC')}>ACC</th>
+            <tr>
+              <th className="text-center w-16">Rank</th>
+              <th>Team/Group</th>
+              <th>Uploader</th>
+              <th>Dataset</th>
+              <th className={`cursor-pointer ${metric==='AUC' ? 'text-brand-600' : ''}`} onClick={()=>setMetric('AUC')}>
+                AUC {metric==='AUC' && '↓'}
+              </th>
+              <th className={`cursor-pointer ${metric==='F1' ? 'text-brand-600' : ''}`} onClick={()=>setMetric('F1')}>
+                F1 {metric==='F1' && '↓'}
+              </th>
+              <th className={`cursor-pointer ${metric==='PRECISION' ? 'text-brand-600' : ''}`} onClick={()=>setMetric('PRECISION')}>
+                Precision {metric==='PRECISION' && '↓'}
+              </th>
+              <th className={`cursor-pointer ${metric==='Recall' ? 'text-brand-600' : ''}`} onClick={()=>setMetric('Recall')}>
+                Accuracy {metric==='ACC' && '↓'}
+              </th>
+              <th className={`cursor-pointer ${metric==='ACC' ? 'text-brand-600' : ''}`} onClick={()=>setMetric('ACC')}>
+                Accuracy {metric==='ACC' && '↓'}
+              </th>
+              <th className="text-center">Actions</th>
             </tr>
           </thead>
           <tbody>
             {items.map((x, i)=> (
-              <tr key={x.submission_id || i} className="border-b">
-                <td className="p-2">{i+1}</td>
-                <td className="p-2">{x.group_name}</td>
-                <td className="p-2">{x.gr ?? x.uploader_username ?? x.uploader_id ?? '-'}</td>
-                <td className="p-2">{getDatasetName(x.dataset_id)}</td>
-                <td className="p-2">{(x.auc!=null) ? x.auc.toFixed?.(4) ?? x.auc : '-'}</td>
-                <td className="p-2">{(x.f1!=null) ? x.f1.toFixed?.(4) ?? x.f1 : '-'}</td>
-                <td className="p-2">{(x.precision!=null) ? x.precision.toFixed?.(4) ?? x.precision : '-'}</td>
-                <td className="p-2">{(x.recall!=null) ? x.recall.toFixed?.(4) ?? x.recall : '-'}</td>
-                <td className="p-2">{(x.acc!=null) ? x.acc.toFixed?.(4) ?? x.acc : '-'}</td>
-                <td className="p-2">
-                  <button className="btn" onClick={()=>loadHistory(x.group_name, x.dataset_id)}>View</button>
+              <tr key={x.submission_id || i} className={i < 3 ? 'bg-brand-50/30' : ''}>
+                <td className="text-center font-bold text-lg">
+                  {typeof getMedal(i+1) === 'string' ? getMedal(i+1) : (
+                    <span className="text-navy-700">{i+1}</span>
+                  )}
+                </td>
+                <td className="font-semibold text-navy-700">{x.group_name}</td>
+                <td className="text-navy-600">{x.gr ?? x.uploader_username ?? x.uploader_id ?? '-'}</td>
+                <td className="text-navy-600">{getDatasetName(x.dataset_id)}</td>
+                <td className={metric==='AUC' ? 'font-bold text-brand-600' : ''}>
+                  {(x.auc!=null) ? x.auc.toFixed?.(4) ?? x.auc : '-'}
+                </td>
+                <td className={metric==='F1' ? 'font-bold text-brand-600' : ''}>
+                  {(x.f1!=null) ? x.f1.toFixed?.(4) ?? x.f1 : '-'}
+                </td>
+                <td className={metric==='PRECISION' ? 'font-bold text-brand-600' : ''}>
+                  {(x.precision!=null) ? x.precision.toFixed?.(4) ?? x.precision : '-'}
+                </td>
+                <td className={metric==='Recall' ? 'font-bold text-brand-600' : ''}>
+                  {(x.precision!=null) ? x.recall.toFixed?.(4) ?? x.recall : '-'}
+                </td>
+                <td className={metric==='ACC' ? 'font-bold text-brand-600' : ''}>
+                  {(x.acc!=null) ? x.acc.toFixed?.(4) ?? x.acc : '-'}
+                </td>
+                <td className="text-center">
+                  <button 
+                    className="btn text-sm px-3 py-1.5" 
+                    onClick={()=>loadHistory(x.group_name, x.dataset_id)}
+                  >
+                    View History
+                  </button>
                 </td>
               </tr>
             ))}
@@ -128,7 +155,47 @@ export default function Leaderboard(){
         </table>
       </div>
 
-    
+      {history.length>0 && (
+        <div className="card">
+          <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 text-navy-700">
+            <span className="text-2xl">📈</span>
+            AUC Performance Over Time — <span className="text-brand-600">{selectedGroup}</span>
+          </h2>
+          <div style={{width:'100%', height:300}}>
+            <ResponsiveContainer>
+              <LineChart data={history}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                <XAxis 
+                  dataKey="i" 
+                  label={{ value: 'Submission #', position: 'insideBottom', offset: -5 }}
+                  tick={{ fill: '#64748B', fontSize: 12 }}
+                />
+                <YAxis 
+                  domain={['auto','auto']} 
+                  tick={{ fill: '#64748B', fontSize: 12 }}
+                  label={{ value: 'AUC Score', angle: -90, position: 'insideLeft' }}
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: '#FFF', 
+                    border: '1px solid #E2E8F0',
+                    borderRadius: '12px',
+                    boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+                  }}
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="auc" 
+                  stroke="#4318FF" 
+                  strokeWidth={3}
+                  dot={{ fill: '#4318FF', r: 4 }}
+                  activeDot={{ r: 6 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
