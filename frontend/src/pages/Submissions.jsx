@@ -51,7 +51,7 @@ export default function Submissions() {
         // promote common metric keys from metrics or nested structures
         if (copy.metrics && typeof copy.metrics === "object") {
           // direct keys
-          ["f1", "precision", "recall", "accuracy", "auc"].forEach((k) => {
+          ["f1", "precision", "recall", "acc", "auc"].forEach((k) => {
             if (copy[k] === undefined && copy.metrics[k] !== undefined) {
               copy[k] = copy.metrics[k];
             }
@@ -59,24 +59,24 @@ export default function Submissions() {
           // some backends place results under .results
           if (copy.metrics.results && typeof copy.metrics.results === "object") {
             Object.keys(copy.metrics.results).forEach((mk) => {
-              if (["f1", "precision", "recall", "accuracy", "auc"].includes(mk) && copy[mk] === undefined) {
+              if (["f1", "precision", "recall", "acc", "auc"].includes(mk) && copy[mk] === undefined) {
                 copy[mk] = copy.metrics.results[mk];
               }
             });
           }
         }
 
-        // map auc -> accuracy/score for UI where appropriate
-        if (copy.accuracy === undefined && copy.auc !== undefined) {
-          copy.accuracy = copy.auc;
+        // map auc -> acc/score for UI where appropriate
+        if (copy.acc === undefined && copy.auc !== undefined) {
+          copy.acc = copy.auc;
         }
         if (copy.score === undefined && copy.auc !== undefined) {
           copy.score = copy.auc;
         }
 
-        // ensure score alias is present from accuracy if needed
-        if (copy.score === undefined && copy.accuracy !== undefined) {
-          copy.score = copy.accuracy;
+        // ensure score alias is present from acc if needed
+        if (copy.score === undefined && copy.acc !== undefined) {
+          copy.score = copy.acc;
         }
 
         // uploaded time fallback
@@ -267,9 +267,15 @@ export default function Submissions() {
                     </div>
                   </div>
                   <div className="flex-1 text-center min-w-[64px]">
+                    <div className="text-xs text-gray-500 uppercase tracking-wide">Precision</div>
+                    <div className="text-2xl text-indigo-600 font-semibold">
+                      {s.precision !== undefined ? Number(s.precision).toFixed(3) : "—"}
+                    </div>
+                  </div>
+                  <div className="flex-1 text-center min-w-[64px]">
                     <div className="text-xs text-gray-500 uppercase tracking-wide">Accuracy</div>
                     <div className="text-2xl text-indigo-600 font-semibold">
-                      {s.accuracy !== undefined ? Number(s.accuracy).toFixed(3) : "—"}
+                      {s.acc !== undefined ? Number(s.acc).toFixed(3) : "—"}
                     </div>
                   </div>
                   <div className="flex-1 text-center min-w-[64px]">

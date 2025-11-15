@@ -14,8 +14,23 @@ export default function SubmissionDetail(){
   }, [id])
 
   if (!data) return <div>Loading...</div>
-  const roc = data.score_json?.ROC || {fpr:[], tpr:[]}
-  const pr = data.score_json?.PR || {precision:[], recall:[]}
+  const metrics = data.score_json ?? {}
+  const getMetric = (key) => {
+    const normalized = key.toLowerCase()
+    const variants = [
+      normalized,
+      normalized.toUpperCase(),
+      normalized.charAt(0).toUpperCase() + normalized.slice(1),
+    ]
+    for (const variant of variants) {
+      if (metrics[variant] !== undefined) {
+        return metrics[variant]
+      }
+    }
+    return undefined
+  }
+  const roc = metrics.ROC || {fpr:[], tpr:[]}
+  const pr = metrics.PR || {precision:[], recall:[]}
   const rocPoints = roc.fpr.map((x,i)=>({x, y: roc.tpr[i]}))
   const prPoints = pr.precision.map((x,i)=>({x, y: pr.recall[i]}))
 
@@ -24,10 +39,10 @@ export default function SubmissionDetail(){
       <div className="text-2xl font-semibold">Submission #{data.id}</div>
       {data.evaluated ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm card">
-          <div>AUC: <b>{data.score_json?.AUC?.toFixed?.(4) ?? '—'}</b></div>
-          <div>F1: <b>{data.score_json?.F1?.toFixed?.(4) ?? '—'}</b></div>
-          <div>Accuracy: <b>{data.score_json?.Accuracy?.toFixed?.(4) ?? '—'}</b></div>
-          <div>Recall: <b>{data.score_json?.Recall?.toFixed?.(4) ?? '—'}</b></div>
+          <div>AUC: <b>{getMetric("auc")?.toFixed?.(4) ?? '—'}</b></div>
+          <div>F1: <b>{getMetric("f1")?.toFixed?.(4) ?? '—'}</b></div>
+          <div>Accuracy: <b>{getMetric("acc")?.toFixed?.(4) ?? '—'}</b></div>
+          <div>Recall: <b>{getMetric("recall")?.toFixed?.(4) ?? '—'}</b></div>
           <div className="col-span-2">Samples: <b>{data.score_json?.n_samples ?? 0}</b></div>
         </div>
       ) : <div className="card">Not evaluated yet.</div>}

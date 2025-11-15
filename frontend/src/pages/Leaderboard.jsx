@@ -93,6 +93,7 @@ export default function Leaderboard(){
               <option value="AUC">AUC</option>
               <option value="F1">F1 Score</option>
               <option value="PRECISION">Precision</option>
+              <option value="RECALL">Recall</option>
               <option value="ACC">Accuracy</option>
             </select>
           </div>
@@ -118,6 +119,9 @@ export default function Leaderboard(){
               </th>
               <th className={`cursor-pointer ${metric==='ACC' ? 'text-brand-600' : ''}`} onClick={()=>setMetric('ACC')}>
                 Accuracy {metric==='ACC' && '↓'}
+              </th>
+              <th className={`cursor-pointer ${metric==='RECALL' ? 'text-brand-600' : ''}`} onClick={()=>setMetric('RECALL')}>
+                Recall {metric==='RECALL' && '↓'}
               </th>
               <th className="text-center">Actions</th>
             </tr>
@@ -145,6 +149,9 @@ export default function Leaderboard(){
                 <td className={metric==='ACC' ? 'font-bold text-brand-600' : ''}>
                   {(x.acc!=null) ? x.acc.toFixed?.(4) ?? x.acc : '-'}
                 </td>
+                <td className={metric==='RECALL' ? 'font-bold text-brand-600' : ''}>
+                  {(x.recall!=null) ? x.recall.toFixed?.(4) ?? x.recall : '-'}
+                </td>
                 <td className="text-center">
                   <button 
                     className="btn text-sm px-3 py-1.5" 
@@ -157,7 +164,7 @@ export default function Leaderboard(){
             ))}
             {items.length===0 && (
               <tr>
-                <td className="p-8 text-center text-slate-500" colSpan={9}>
+                <td className="p-8 text-center text-slate-500" colSpan={10}>
                   No submissions found for the selected dataset/metric.
                 </td>
               </tr>

@@ -51,7 +51,7 @@ export default function Dashboard(){
     const ranges = { 'Excellent (>0.9)': 0, 'Good (0.8-0.9)': 0, 'Fair (0.7-0.8)': 0, 'Poor (<0.7)': 0 }
     
     subs.items.forEach(sub => {
-      const score = sub.auc || sub.accuracy || sub.score || 0
+      const score = sub.auc || sub.acc || sub.accuracy || sub.score || 0
       if (score > 0.9) ranges['Excellent (>0.9)']++
       else if (score > 0.8) ranges['Good (0.8-0.9)']++
       else if (score > 0.7) ranges['Fair (0.7-0.8)']++
@@ -65,19 +65,20 @@ export default function Dashboard(){
 
   // Calculate average metrics
   const avgMetrics = React.useMemo(() => {
-    if (!subs.items || subs.items.length === 0) return { auc: 0, f1: 0, accuracy: 0 }
-    
+    if (!subs.items || subs.items.length === 0) return { auc: 0, f1: 0, acc: 0 }
+
     let aucSum = 0, f1Sum = 0, accSum = 0, count = 0
     subs.items.forEach(sub => {
+      const accValue = sub.acc ?? sub.accuracy
       if (sub.auc) { aucSum += sub.auc; count++ }
       if (sub.f1) f1Sum += sub.f1
-      if (sub.accuracy) accSum += sub.accuracy
+      if (accValue) accSum += accValue
     })
-    
+
     return {
       auc: count > 0 ? (aucSum / count).toFixed(3) : 0,
       f1: count > 0 ? (f1Sum / count).toFixed(3) : 0,
-      accuracy: count > 0 ? (accSum / count).toFixed(3) : 0
+      acc: count > 0 ? (accSum / count).toFixed(3) : 0
     }
   }, [subs.items])
 
@@ -241,7 +242,7 @@ export default function Dashboard(){
             </div>
             <div className="flex justify-between items-center p-4 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
               <span className="text-navy-600 font-medium">Avg Accuracy</span>
-              <span className="font-semibold text-purple-600 text-lg">{avgMetrics.accuracy}</span>
+              <span className="font-semibold text-purple-600 text-lg">{avgMetrics.acc}</span>
             </div>
           </div>
         </div>

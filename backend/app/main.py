@@ -4,7 +4,13 @@ from .database import Base, engine, SessionLocal
 from .models import User
 from .utils import hash_password
 from .routers import auth, users, datasets, submissions, leaderboard, apitest
+import logging
 import os
+
+logging.basicConfig(
+    level=os.getenv("APP_LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 Base.metadata.create_all(bind=engine)
 
