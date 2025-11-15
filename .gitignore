@@ -16,3 +16,4 @@
 **/*.pyo
 **/*.pyd
 **/*.swp
+backend/dev.db
