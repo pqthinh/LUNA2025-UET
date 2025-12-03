@@ -7,6 +7,37 @@ import {
   CartesianGrid, Legend, PieChart, Pie, Cell 
 } from 'recharts'
 
+// Format date to Vietnamese locale (Asia/Ho_Chi_Minh)
+const toVietnameseTime = (dateStr) => {
+  if (!dateStr) return ""
+  try {
+    return new Date(dateStr).toLocaleString("vi-VN", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    })
+  } catch {
+    return new Date(dateStr).toLocaleString()
+  }
+}
+
+const toVietnameseDate = (dateStr) => {
+  if (!dateStr) return ""
+  try {
+    return new Date(dateStr).toLocaleDateString("vi-VN", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      month: "short",
+      day: "numeric"
+    })
+  } catch {
+    return new Date(dateStr).toLocaleDateString()
+  }
+}
+
 export default function Dashboard(){
   const { API, authHeader, token } = useAuth()
   const [datasets, setDatasets] = useState({items:[]})
@@ -37,7 +68,7 @@ export default function Dashboard(){
     subs.items.forEach(sub => {
       const date = sub.uploaded_at || sub.created_at
       if (!date) return
-      const day = new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      const day = toVietnameseDate(date)
       grouped[day] = (grouped[day] || 0) + 1
     })
     
@@ -101,7 +132,7 @@ export default function Dashboard(){
           <p className="text-navy-600 mt-2 text-base">Welcome to LUNA25 Lung Cancer Prediction System</p>
         </div>
         <div className="text-sm text-slate-500 bg-white px-4 py-2 rounded-xl border border-slate-200">
-          {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+          {new Date().toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
         </div>
       </div>
 

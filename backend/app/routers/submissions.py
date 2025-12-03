@@ -166,10 +166,16 @@ def list_submissions(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    # join datasets to expose dataset.name (left outer join)
+    # join datasets and users to expose dataset.name and user info
     q = (
-        db.query(models.Submission, models.Dataset.name.label("dataset_name"))
+        db.query(
+            models.Submission,
+            models.Dataset.name.label("dataset_name"),
+            models.User.username.label("uploader_username"),
+            models.User.full_name.label("uploader_full_name")
+        )
         .outerjoin(models.Dataset, models.Dataset.id == models.Submission.dataset_id)
+        .outerjoin(models.User, models.User.id == models.Submission.user_id)
         .order_by(models.Submission.id.desc())
     )
     total = q.count()
@@ -177,9 +183,18 @@ def list_submissions(
 
     items = []
     for row in rows:
-        # row is tuple (Submission, dataset_name) because we selected two columns
-        sub = row[0]
-        dataset_name = row[1] if len(row) > 1 else None
+        # row is tuple (Submission, dataset_name, uploader_username, uploader_full_name)
+        try:
+            sub = row[0]
+            dataset_name = row[1] if len(row) > 1 else None
+            uploader_username = row[2] if len(row) > 2 else None
+            uploader_full_name = row[3] if len(row) > 3 else None
+        except (IndexError, TypeError):
+            # fallback if query structure unexpected
+            sub = row if not isinstance(row, tuple) else row[0]
+            dataset_name = None
+            uploader_username = None
+            uploader_full_name = None
 
         d = {}
         for k, v in sub.__dict__.items():
@@ -201,6 +216,15 @@ def list_submissions(
             # fallback: if dataset_id present, show id as string
             if d.get("dataset_id") is not None:
                 d["dataset_name"] = f"Dataset {d.get('dataset_id')}"
+
+        # attach uploader info (optional fields for frontend)
+        if uploader_username:
+            d["uploader_username"] = uploader_username
+        if uploader_full_name:
+            d["uploader_full_name"] = uploader_full_name
+        # ensure uploader field exists for backward compatibility
+        if "uploader" not in d and uploader_username:
+            d["uploader"] = uploader_username
 
         # try to surface common metric fields (existing logic)
         metrics = None

@@ -37,6 +37,10 @@ class DatasetOut(BaseModel):
     description: Optional[str] = None
     uploader_id: Optional[int]
     is_official: bool
+    data_file_path: Optional[str] = None
+    groundtruth_path: Optional[str] = None
+    uploader_username: Optional[str] = None
+    uploader_full_name: Optional[str] = None
     stats_json: Optional[Dict[str, Any]]
     created_at: datetime
     class Config:

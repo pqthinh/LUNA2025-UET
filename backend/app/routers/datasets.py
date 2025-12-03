@@ -87,14 +87,46 @@ def list_datasets(
             # if user info missing, default to only official datasets
             q = q.filter(models.Dataset.is_official == True)
 
-    return Paginator(
+    page = Paginator(
         query=q.order_by(models.Dataset.created_at.desc()),
         page=params.page,
         page_size=params.page_size
     ).execute()
 
-@router.post("/", response_model=schemas.DatasetOut, dependencies=[Depends(require_admin)],
-           status_code=status.HTTP_201_CREATED)
+    # attach uploader username/full_name for frontend convenience
+    uploader_ids = {getattr(ds, "uploader_id", None) for ds in page.items}
+    uploader_ids.discard(None)
+    users_map = {}
+    if uploader_ids:
+        users = db.query(models.User).filter(models.User.id.in_(list(uploader_ids))).all()
+        for u in users:
+            users_map[getattr(u, "id")] = u
+
+    items = []
+    for ds in page.items:
+        # convert SQLAlchemy model to dict-like object accepted by Pydantic
+        obj = {}
+        for k, v in ds.__dict__.items():
+            if k == "_sa_instance_state":
+                continue
+            if hasattr(v, "isoformat"):
+                try:
+                    obj[k] = v.isoformat()
+                except Exception:
+                    obj[k] = v
+            else:
+                obj[k] = v
+        u = users_map.get(obj.get("uploader_id"))
+        if u:
+            obj["uploader_username"] = getattr(u, "username", None)
+            obj["uploader_full_name"] = getattr(u, "full_name", None)
+            # also provide uploader for backward compatibility
+            obj.setdefault("uploader", obj.get("uploader_username") or obj.get("uploader_id"))
+        items.append(obj)
+
+    return {"items": items, "total": page.total, "page": page.page, "page_size": page.page_size}
+
+@router.post("/", response_model=schemas.DatasetOut, status_code=status.HTTP_201_CREATED)
 async def upload_dataset(
     name: str = Form(...),
     description: str = Form(""),
@@ -103,7 +135,7 @@ async def upload_dataset(
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
-    """Upload a new dataset. Only admins can create datasets.
+    """Upload a new dataset. Authenticated users can create datasets.
     - data_file: Optional dataset file (e.g. images archive)
     - groundtruth_csv: Required CSV with ground truth labels (must have id,label columns)
     Files are uploaded to MinIO and DB stores minio://bucket/object paths.
@@ -264,6 +296,18 @@ def get_dataset(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied"
         )
+    # attach uploader username/full_name for frontend convenience
+    try:
+        if ds.uploader_id is not None:
+            u = db.query(models.User).filter(models.User.id == ds.uploader_id).first()
+            if u:
+                setattr(ds, "uploader_username", getattr(u, "username", None))
+                setattr(ds, "uploader_full_name", getattr(u, "full_name", None))
+                # backward compat
+                if not getattr(ds, "uploader", None):
+                    setattr(ds, "uploader", getattr(u, "username", None))
+    except Exception:
+        pass
     return ds
 
 @router.get("/{id}/groundtruth")
@@ -272,8 +316,9 @@ def download_groundtruth(
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
-    """Download dataset ground truth CSV. Protected - users can only access official
-    datasets or their own uploads."""
+    """Download dataset ground truth CSV.
+    Access policy: admins or the dataset uploader can download the groundtruth CSV.
+    """
     ds = db.query(models.Dataset).get(id)
     if not ds:
         raise HTTPException(
@@ -281,16 +326,23 @@ def download_groundtruth(
             detail="Dataset not found"
         )
     
-    if user.role != "admin" and not ds.is_official and ds.uploader_id != user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
-    
     if not ds.groundtruth_path:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Ground truth file not found"
+        )
+
+    # authorization: allow admin or original uploader
+    try:
+        if user.role != "admin" and ds.uploader_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
         )
 
     safe_name = "".join(c for c in ds.name if c.isalnum() or c in "-_").lower()
@@ -321,18 +373,157 @@ def download_groundtruth(
             filename=filename
         )
 
-@router.post("/{id}/analyze",
-            response_model=schemas.DatasetOut,
-            dependencies=[Depends(require_admin)])
-def analyze_dataset(id: int, db: Session = Depends(get_db)):
-    """Analyze dataset ground truth to compute statistics. Admin only."""
+@router.get("/{id}/data")
+def download_dataset_file(
+    id: int,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    """Download the dataset's main data file (if any).
+    Access policy: admins can download any; non-admins can download official datasets
+    or their own uploads."""
     ds = db.query(models.Dataset).get(id)
     if not ds:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Dataset not found"
         )
-    
+
+    if user.role != "admin" and not ds.is_official and ds.uploader_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    if not ds.data_file_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset file not found"
+        )
+
+    safe_name = "".join(c for c in ds.name if c.isalnum() or c in "-_").lower()
+    # Try to preserve original extension if present in object name
+    filename = f"{safe_name}_data"
+
+    if ds.data_file_path.startswith("minio://"):
+        _, _, path = ds.data_file_path.partition("://")
+        bucket, _, obj = path.partition("/")
+        # infer extension from object key
+        _, ext = os.path.splitext(obj)
+        if ext:
+            filename = f"{filename}{ext}"
+        try:
+            obj_resp = minio_client.get_object(bucket, obj)
+            headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+            # content type best-effort
+            media_type = "application/octet-stream"
+            return StreamingResponse(obj_resp, media_type=media_type, headers=headers)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Dataset file not found in storage"
+            )
+    else:
+        # local filesystem path
+        if not os.path.exists(ds.data_file_path):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Dataset file not found"
+            )
+        _, ext = os.path.splitext(ds.data_file_path)
+        if ext:
+            filename = f"{filename}{ext}"
+        return FileResponse(
+            ds.data_file_path,
+            media_type="application/octet-stream",
+            filename=filename
+        )
+
+@router.delete("/{id}", response_model=schemas.DatasetOut)
+def delete_dataset(
+    id: int,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    """Delete a dataset. Only admin or the original uploader can delete.
+    Performs best-effort cleanup of stored files in MinIO or local filesystem."""
+    ds = db.query(models.Dataset).get(id)
+    if not ds:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found"
+        )
+
+    if user.role != "admin" and ds.uploader_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    # Attempt to remove storage objects
+    def remove_path(p: Optional[str]):
+        if not p:
+            return
+        try:
+            if p.startswith("minio://"):
+                _, _, path = p.partition("://")
+                bucket, _, obj = path.partition("/")
+                try:
+                    minio_client.remove_object(bucket, obj)
+                except Exception:
+                    # ignore failures but log
+                    logger.debug("MinIO remove_object failed", exc_info=True)
+            else:
+                if os.path.exists(p):
+                    try:
+                        os.unlink(p)
+                    except Exception:
+                        logger.debug("Filesystem unlink failed", exc_info=True)
+        except Exception:
+            logger.debug("remove_path unexpected failure", exc_info=True)
+
+    try:
+        # Store copy for response after deletion
+        deleted_ds = schemas.DatasetOut.from_orm(ds)
+        # Delete DB row
+        db.delete(ds)
+        db.commit()
+        # Cleanup storage after DB commit (best-effort)
+        remove_path(getattr(deleted_ds, "data_file_path", None))
+        remove_path(getattr(deleted_ds, "groundtruth_path", None))
+        return deleted_ds
+    except Exception as e:
+        logger.exception("Failed to delete dataset")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete dataset"
+        )
+
+@router.post("/{id}/analyze", response_model=schemas.DatasetOut)
+def analyze_dataset(id: int, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    """Analyze dataset ground truth to compute statistics.
+    Allowed for admins or the original uploader."""
+    ds = db.query(models.Dataset).get(id)
+    if not ds:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found"
+        )
+    # authorization: admins or uploader only
+    try:
+        if user.role != "admin" and ds.uploader_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+    except Exception:
+        # if user info missing or attribute access fails, deny
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
     if not ds.groundtruth_path:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
