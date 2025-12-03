@@ -1,6 +1,6 @@
 import React, {useEffect} from 'react'
 import ReactDOM from 'react-dom/client'
-import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import './index.css'
 import LoginPage from './pages/LoginPage.jsx'
 import RegisterPage from './pages/RegisterPage.jsx'
@@ -47,10 +47,22 @@ function AppShell() {
   const [q, setQ] = React.useState('')
 
   const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
     setPageTitle(usePageTitle());
   }, [location]);
+
+  const pathBase = location.pathname.replace(/\/\d+$/,'');
+  const isSearchEnabled = pathBase === '/datasets' || pathBase.startsWith('/submissions');
+
+  const onSearchKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      if (!isSearchEnabled) return;
+      const dest = pathBase === '/datasets' ? '/datasets' : '/submissions';
+      navigate(`${dest}?q=${encodeURIComponent(q || '')}`);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -75,9 +87,11 @@ function AppShell() {
             <NavLink to="/leaderboard" className={({isActive})=> isActive ? 'nav-link nav-link-active' : 'nav-link'}>
               <span className="text-lg mr-2">🏆</span> Leaderboard
             </NavLink>
-            <NavLink to="/apitest" className={({isActive})=> isActive ? 'nav-link nav-link-active' : 'nav-link'}>
-              <span className="text-lg mr-2">🧪</span> API Test
-            </NavLink>
+            {user?.role === "admin" && (
+              <NavLink to="/apitest" className={({isActive})=> isActive ? 'nav-link nav-link-active' : 'nav-link'}>
+                <span className="text-lg mr-2">🧪</span> API Test
+              </NavLink>
+            )}
             <NavLink to="/notebook" className={({isActive})=> isActive ? 'nav-link nav-link-active' : 'nav-link'}>
               <span className="text-lg mr-2">📔</span> Notebook
             </NavLink>
@@ -122,15 +136,19 @@ function AppShell() {
             <h1 className="text-2xl font-bold bg-gradient-to-r from-brand-500 to-brand-600 bg-clip-text text-transparent font-display">
               {pageTitle || 'LUNA25UET'}
             </h1>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400">🔍</span>
-              <input 
-                value={q} 
-                onChange={e=>setQ(e.target.value)} 
-                placeholder="Search datasets, submissions..." 
-                className="input w-80 !pl-10 bg-slate-50/50 border-slate-200"
-              />
-            </div>
+            {isSearchEnabled ? (
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400">🔍</span>
+                <input 
+                  value={q} 
+                  onChange={e=>setQ(e.target.value)} 
+                  onKeyDown={onSearchKeyDown}
+                  placeholder={pathBase === '/datasets' ? 'Search datasets by name or uploader...' : 'Search submissions by uploader or dataset...'} 
+                  className="input w-full max-w-4xl !pl-10 bg-slate-50/50 border-slate-200"
+                  aria-label="Search"
+                />
+              </div>
+            ) : null}
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-brand-50 to-indigo-50 rounded-xl border border-brand-200">

@@ -1,6 +1,32 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { useAuth } from "../state/auth.jsx";
+import { useLocation } from "react-router-dom";
+
+// Format date to Vietnamese locale (Asia/Ho_Chi_Minh)
+const toVietnameseTime = (dateStr) => {
+  if (!dateStr) return "";
+  try {
+    // If timestamp has no timezone offset (e.g. "2025-12-03T05:10:43"),
+    // treat it as UTC by appending 'Z' before parsing. This avoids
+    // inconsistent parsing across browsers which can interpret such
+    // strings as local time and cause a ~7 hour shift.
+    let s = String(dateStr);
+    const noTZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(s);
+    if (noTZ) s = s + "Z";
+    return new Date(s).toLocaleString("vi-VN", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return String(dateStr);
+  }
+};
 
 export default function Datasets() {
   const { API, authHeader, user } = useAuth();
@@ -13,6 +39,15 @@ export default function Datasets() {
   const [dataFile, setDataFile] = useState(null);
   const [gtFile, setGtFile] = useState(null);
   const [msg, setMsg] = useState("");
+
+  const location = useLocation();
+  const qParam = (() => {
+    try {
+      return String(new URLSearchParams(location.search).get("q") || "").trim().toLowerCase();
+    } catch {
+      return "";
+    }
+  })();
 
   // Replace / implement load function to include auth header and handle 401
   const load = async () => {
@@ -38,10 +73,16 @@ export default function Datasets() {
 
       const json = await res.json();
       const results = json.items ?? json.results ?? json.data ?? json;
-      setItems(results || []);
-      setTotal(
-        json.total ?? json.total_items ?? json.count ?? (results ? results.length : 0)
-      );
+      let list = results || [];
+      if (qParam) {
+        list = (list || []).filter((d) => {
+          const name = String(d.name || "").toLowerCase();
+          const uploader = String(d.uploader_username || d.uploader_full_name || d.uploader || d.uploader_id || "").toLowerCase();
+          return name.includes(qParam) || uploader.includes(qParam);
+        });
+      }
+      setItems(list);
+      setTotal(qParam ? list.length : (json.total ?? json.total_items ?? json.count ?? (results ? results.length : 0)));
       setMsg("");
     } catch (err) {
       console.error("load datasets error", err);
@@ -55,7 +96,7 @@ export default function Datasets() {
 
   useEffect(() => {
     load();
-  }, [page]);
+  }, [page, location.search]);
 
   const upload = async (e) => {
     e.preventDefault();
@@ -111,6 +152,7 @@ export default function Datasets() {
 
   // Ensure download uses the same auth header
   const downloadGroundtruth = async (id, name) => {
+    // backend enforces access (admin or dataset uploader). UI only delegates request.
     try {
       const headers =
         typeof authHeader === "function"
@@ -133,7 +175,77 @@ export default function Datasets() {
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error("downloadGroundtruth error:", err);
-      alert("Failed to download groundtruth");
+      if (err && String(err).toLowerCase().includes('403')) {
+        alert('Access denied — groundtruth restricted');
+      } else {
+        alert("Failed to download groundtruth");
+      }
+    }
+  };
+
+  const hasDatasetFile = (d) => {
+    const p = d?.data_file_path || d?.data_file || d?.data_url;
+    return !!p && typeof p === "string" && p.length > 0;
+  };
+
+  const canDownloadDataset = (d) => {
+    if (!user) return false;
+    if (user.role === "admin") return true;
+    return !!(hasDatasetFile(d) && (d?.is_official || d?.uploader_id === user?.id));
+  };
+
+  const downloadDataset = async (id, name) => {
+    try {
+      const headers = typeof authHeader === "function" ? authHeader() : authHeader || {};
+      const res = await fetch(`${API}/datasets/${id}/data`, { headers });
+      if (res.status === 401) {
+        alert("Unauthorized — please login");
+        return;
+      }
+      if (res.status === 403) {
+        alert("Access denied");
+        return;
+      }
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(name || "dataset")}_data`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("downloadDataset error:", err);
+      alert("Failed to download dataset file");
+    }
+  };
+
+  const canDelete = (d) => {
+    if (!user) return false;
+    if (user.role === "admin") return true;
+    return d?.uploader_id === user?.id;
+  };
+
+  const deleteDataset = async (id) => {
+    if (!window.confirm("Delete this dataset? This cannot be undone.")) return;
+    try {
+      const headers = typeof authHeader === "function" ? authHeader() : authHeader || {};
+      const res = await fetch(`${API}/datasets/${id}`, { method: "DELETE", headers });
+      if (res.status === 401) {
+        alert("Unauthorized — please login");
+        return;
+      }
+      if (res.status === 403) {
+        alert("Access denied");
+        return;
+      }
+      if (!res.ok) throw new Error(await res.text());
+      await load();
+    } catch (err) {
+      console.error("deleteDataset error:", err);
+      alert("Failed to delete dataset");
     }
   };
 
@@ -159,6 +271,9 @@ export default function Datasets() {
 
   // Display uploader as readable text (name / uploader_id / id) instead of dumping JSON
   const getUploaderDisplay = (d) => {
+    // prefer explicit uploader_username/full_name provided by the API
+    if (d?.uploader_username) return String(d.uploader_username);
+    if (d?.uploader_full_name) return String(d.uploader_full_name);
     const u = d?.uploader;
     if (!u) {
       if (d?.uploader_id) return String(d.uploader_id);
@@ -187,11 +302,15 @@ export default function Datasets() {
       "stats",
       "stats_raw",
       "groundtruth_csv",
+      "groundtruth_path",
       "groundtruth_url",
       "data_file",
+      "data_file_path",
       "data_url",
     ]);
-    const extras = Object.keys(d).filter((k) => !known.has(k));
+    const extras = Object.keys(d).filter(
+      (k) => !known.has(k) && !k.startsWith("uploader") && !k.startsWith("user")
+    );
     if (extras.length === 0) return null;
     const obj = {};
     extras.forEach((k) => (obj[k] = d[k]));
@@ -205,7 +324,7 @@ export default function Datasets() {
   return (
     <div className="space-y-6">
       <div className="text-2xl font-semibold">Datasets</div>
-      {user?.role === "admin" && (
+      {user && (
         <form onSubmit={upload} className="card grid gap-3">
           <div className="grid md:grid-cols-2 gap-3">
             <div>
@@ -271,10 +390,7 @@ export default function Datasets() {
                       <div className="text-sm opacity-70 ml-2">
                         {getUploaderDisplay(d)}
                         {d.created_at || d.created || d.createdAt
-                          ? " • " +
-                            new Date(
-                              d.created_at || d.created || d.createdAt
-                            ).toLocaleString()
+                          ? " • " + toVietnameseTime(d.created_at || d.created || d.createdAt)
                           : ""}
                       </div>
                     </div>
@@ -329,29 +445,48 @@ export default function Datasets() {
 
                   <div className="flex flex-col items-end gap-2">
                     <div className="flex gap-2">
-                      <button
-                        className="btn"
-                        onClick={() => downloadGroundtruth(d.id, d.name)}
-                      >
-                        Download GT
-                      </button>
+                      {(user?.role === "admin" || user?.id === d?.uploader_id) && (
+                        <button
+                          className="btn"
+                          onClick={() => downloadGroundtruth(d.id, d.name)}
+                        >
+                          Download GT
+                        </button>
+                      )}
 
-                      {user?.role === "admin" && (
+                      {hasDatasetFile(d) && canDownloadDataset(d) && (
+                        <button
+                          className="btn"
+                          onClick={() => downloadDataset(d.id, d.name)}
+                        >
+                          Download Dataset
+                        </button>
+                      )}
+
+                      {canDelete(d) && (
+                        <button className="btn btn-danger" onClick={() => deleteDataset(d.id)}>
+                          Delete
+                        </button>
+                      )}
+
+                      {(user?.role === "admin" || user?.id === d?.uploader_id) && (
                         <>
                           <button className="btn" onClick={() => analyze(d.id)}>
                             Analyze
                           </button>
 
-                          <label className="flex items-center gap-2 ml-1">
-                            <input
-                              type="checkbox"
-                              className="checkbox"
-                              checked={!!d.is_official}
-                              onChange={() => toggleOfficial(d)}
-                              title="Mark official (admin only)"
-                            />
-                            <span className="text-sm">Official</span>
-                          </label>
+                          {user?.role === "admin" && (
+                            <label className="flex items-center gap-2 ml-1">
+                              <input
+                                type="checkbox"
+                                className="checkbox"
+                                checked={!!d.is_official}
+                                onChange={() => toggleOfficial(d)}
+                                title="Mark official (admin only)"
+                              />
+                              <span className="text-sm">Official</span>
+                            </label>
+                          )}
                         </>
                       )}
                     </div>
@@ -362,9 +497,7 @@ export default function Datasets() {
                       <div>
                         Created:{" "}
                         {d.created_at || d.created || d.createdAt
-                          ? new Date(
-                              d.created_at || d.created || d.createdAt
-                            ).toLocaleString()
+                          ? toVietnameseTime(d.created_at || d.created || d.createdAt)
                           : "N/A"}
                       </div>
                       <div>

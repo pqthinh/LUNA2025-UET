@@ -3,11 +3,29 @@ import axios from 'axios'
 import { useAuth } from '../state/auth.jsx'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 
+// Format date to Vietnamese locale (Asia/Ho_Chi_Minh)
+const toVietnameseTime = (dateStr) => {
+  if (!dateStr) return ""
+  try {
+    return new Date(dateStr).toLocaleString("vi-VN", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    })
+  } catch {
+    return new Date(dateStr).toLocaleString()
+  }
+}
+
 export default function Leaderboard(){
   const { API, token } = useAuth()
   const [items, setItems] = useState([])
   const [datasets, setDatasets] = useState([]) // API may return array or {items:[]}
-  const [datasetId, setDatasetId] = useState('')
+  const [selectedDatasetId, setSelectedDatasetId] = useState('')
   const [history, setHistory] = useState([])
   const [selectedGroup, setSelectedGroup] = useState('')
   const [metric, setMetric] = useState('AUC')
@@ -22,8 +40,8 @@ export default function Leaderboard(){
       setDatasets(Array.isArray(dsData) ? dsData : (dsData && dsData.items) ? dsData.items : [])
 
       const params = new URLSearchParams()
-      if (datasetId) params.append('dataset_id', datasetId)
       if (metric) params.append('metric', metric)
+      if (selectedDatasetId) params.append('dataset_id', selectedDatasetId)
       const lbResp = await axios.get(`${API}/leaderboard/?${params.toString()}`, opts)
       const lbData = lbResp.data
       setItems(Array.isArray(lbData) ? lbData : (lbData && lbData.items) ? lbData.items : [])
@@ -35,7 +53,7 @@ export default function Leaderboard(){
       setItems([])
     }
   }
-  useEffect(()=>{ load() }, [datasetId, metric])
+  useEffect(()=>{ load() }, [metric, selectedDatasetId])
 
   const loadHistory = async (group, dsid)=>{
     setSelectedGroup(group)
@@ -67,6 +85,25 @@ export default function Leaderboard(){
     return rank
   }
 
+  const _looksLikeAutoUser = (v) => {
+    if (!v) return false
+    return /^user[_-]?\d+$/i.test(String(v))
+  }
+
+  const getGroupDisplay = (x) => {
+    if (x?.group_name && !_looksLikeAutoUser(x.group_name)) return x.group_name
+    if (x?.gr && !_looksLikeAutoUser(x.gr)) return x.gr
+    return '-'
+  }
+
+  const getUploaderDisplay = (x) => {
+    if (x?.uploader_username) return x.uploader_username
+    if (x?.uploader_full_name) return x.uploader_full_name
+    if (x?.gr && !_looksLikeAutoUser(x.gr)) return x.gr
+    if (x?.uploader_id != null) return String(x.uploader_id)
+    return '-'
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -80,13 +117,15 @@ export default function Leaderboard(){
 
       <div className="card">
         <div className="flex gap-4 items-center flex-wrap">
-          <div>
-            <div className="label">Filter by Dataset</div>
-            <select className="input w-64" value={datasetId} onChange={e=>setDatasetId(e.target.value)}>
-              <option value="">All Datasets</option>
-              {datasets.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
-          </div>
+            <div>
+              <div className="label">Dataset</div>
+              <select className="input w-64" value={selectedDatasetId} onChange={e=>setSelectedDatasetId(e.target.value)}>
+                <option value="">(All datasets)</option>
+                {datasets.map(ds=> (
+                  <option key={ds.id} value={ds.id}>{ds.name ?? `Dataset ${ds.id}`}</option>
+                ))}
+              </select>
+            </div>
           <div>
             <div className="label">Sort by Metric</div>
             <select className="input w-48" value={metric} onChange={e=>setMetric(e.target.value)}>
@@ -134,8 +173,8 @@ export default function Leaderboard(){
                     <span className="text-navy-700">{i+1}</span>
                   )}
                 </td>
-                <td className="font-semibold text-navy-700">{x.group_name}</td>
-                <td className="text-navy-600">{x.gr ?? x.uploader_username ?? x.uploader_id ?? '-'}</td>
+                <td className="font-semibold text-navy-700">{getGroupDisplay(x)}</td>
+                <td className="text-navy-600">{getUploaderDisplay(x)}</td>
                 <td className="text-navy-600">{getDatasetName(x.dataset_id)}</td>
                 <td className={metric==='AUC' ? 'font-bold text-brand-600' : ''}>
                   {(x.auc!=null) ? x.auc.toFixed?.(4) ?? x.auc : '-'}
@@ -155,7 +194,7 @@ export default function Leaderboard(){
                 <td className="text-center">
                   <button 
                     className="btn text-sm px-3 py-1.5" 
-                    onClick={()=>loadHistory(x.group_name, x.dataset_id)}
+                    onClick={()=>loadHistory(getGroupDisplay(x), x.dataset_id)}
                   >
                     View History
                   </button>

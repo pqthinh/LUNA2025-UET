@@ -1,6 +1,28 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { useAuth } from "../state/auth.jsx";
+import { useLocation } from "react-router-dom";
+
+// Format date to Vietnamese locale (Asia/Ho_Chi_Minh)
+const toVietnameseTime = (dateStr) => {
+  if (!dateStr) return "";
+  try {
+    let s = String(dateStr);
+    const noTZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(s);
+    if (noTZ) s = s + "Z";
+    return new Date(s).toLocaleString("vi-VN", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return String(dateStr);
+  }
+};
 
 export default function Submissions() {
   const { API, authHeader, user } = useAuth();
@@ -10,6 +32,15 @@ export default function Submissions() {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
+
+  const location = useLocation();
+  const qParam = (() => {
+    try {
+      return String(new URLSearchParams(location.search).get("q") || "").trim().toLowerCase();
+    } catch {
+      return "";
+    }
+  })();
 
   // Use same header helper as Datasets.jsx (keeps behavior identical)
   const getHeaders = () => (typeof authHeader === "function" ? authHeader() : authHeader || {});
@@ -95,7 +126,16 @@ export default function Submissions() {
         return copy;
       });
 
-      setSubmissions(normalized);
+      // apply client-side search filter (by dataset name or uploader)
+      let list = normalized;
+      if (qParam) {
+        list = (normalized || []).filter((s) => {
+          const dataset = String(s.dataset_name || s.dataset_id || "").toLowerCase();
+          const uploader = String(s.uploader_username || s.uploader_full_name || s.uploader_id || s.uploader || s.user_id || "").toLowerCase();
+          return dataset.includes(qParam) || uploader.includes(qParam);
+        });
+      }
+      setSubmissions(list);
 
       // --- replace fetch with axios to surface backend validation error ---
       let dItems = [];
@@ -137,7 +177,7 @@ export default function Submissions() {
   useEffect(() => {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [location.search]);
 
   const upload = async (e) => {
     e.preventDefault();
@@ -233,7 +273,19 @@ export default function Submissions() {
         <div className="card">No submissions found.</div>
       ) : (
         <div className="grid gap-3">
-          {submissions.map((s) => (
+          {submissions.map((s) => {
+            const ownerIdRaw = s.uploader_id ?? s.user_id ?? s.uploader ?? null;
+            let ownerId = null;
+            if (ownerIdRaw != null) {
+              if (typeof ownerIdRaw === "number") ownerId = ownerIdRaw;
+              else if (/^\d+$/.test(String(ownerIdRaw))) ownerId = Number(ownerIdRaw);
+              else {
+                // try to extract digits from strings like 'user_123'
+                const m = String(ownerIdRaw).match(/(\d+)/);
+                ownerId = m ? Number(m[1]) : null;
+              }
+            }
+            return (
             <div key={s.id ?? s.filename} className="card flex items-center justify-between p-4">
               {/* left: basic info */}
               <div className="flex-1 pr-6">
@@ -246,11 +298,13 @@ export default function Submissions() {
                 </div>
                 <div className="text-sm text-gray-600 mt-1">
                   Uploader:{" "}
-                  <span className="font-medium text-gray-800">{String(s.uploader_id ?? s.uploader ?? "N/A")}</span>
+                  <span className="font-medium text-gray-800">
+                    {s.uploader_username || s.uploader_full_name || String(s.uploader_id ?? s.uploader ?? "N/A")}
+                  </span>
                 </div>
                 {s.uploaded_at && (
                   <div className="text-xs text-gray-500 mt-1">
-                    Uploaded: {new Date(s.uploaded_at).toLocaleString()}
+                    Uploaded: {toVietnameseTime(s.uploaded_at)}
                   </div>
                 )}
               </div>
@@ -307,8 +361,8 @@ export default function Submissions() {
                         <line x1="12" y1="15" x2="12" y2="3" />
                       </svg>
                   </a>
-                  {(user?.role === "admin" || user?.id === s.uploader_id) && (
-                    <button className="btn-icon btn-icon-danger" title="Delete submission" onClick={() => deleteSubmission(s.id, s.uploader_id)}>
+                  {(user?.role === "admin" || user?.id === ownerId) && (
+                    <button className="btn-icon btn-icon-danger" title="Delete submission" onClick={() => deleteSubmission(s.id, ownerId)}>
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
                         <path d="M3 6h18" />
                         <path d="M8 6v12a2 2 0 002 2h4a2 2 0 002-2V6" />
@@ -321,7 +375,8 @@ export default function Submissions() {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
